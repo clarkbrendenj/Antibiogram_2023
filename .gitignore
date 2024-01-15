@@ -9,7 +9,4 @@
 *.csv
 *.txt
 *.xlsx
-.twb
-*.twbr
-*.hyper
 *.DS_Store
