@@ -1,0 +1,15 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.git
+!org_names.csv
+!piptaz.csv
+*.env
+*.csv
+*.txt
+*.xlsx
+.twb
+*.twbr
+*.hyper
+*.DS_Store

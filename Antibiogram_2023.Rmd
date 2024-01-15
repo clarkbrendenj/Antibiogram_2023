@@ -1,0 +1,780 @@
+---
+title: "Antibiogram_2023"
+output: html_document
+date: "2023-11-28"
+---
+
+```{r}
+reticulate::repl_python()
+```
+```{python}
+import os
+import oracledb
+from dotenv import dotenv_values
+import pandas as pd
+from shutil import copy2
+
+__location__ = os.path.realpath(os.getcwd())
+data_location = __location__ + "/data/"
+back_up = __location__ + "/back_up/"
+
+def clear_back_up_folder():
+    for file in os.listdir(back_up):
+        os.remove(back_up + file)
+
+
+def copy_current_files_to_back_up():
+    for file in os.listdir(data_location):
+        copy2(data_location + file, back_up)
+        
+
+        
+config = dotenv_values(__location__ + "/.env")
+
+
+oracledb.init_oracle_client(lib_dir="C:/Oracle/instantclient_21_9/")
+connection = oracledb.connect(
+    user=config["DB_USER"], password=config["DB_PASS"], dsn=config["DB_NAME"]
+)
+        
+        
+```
+```{python}
+query = """
+SELECT
+  per.NAME_FULL_FORMATTED as "Person Name - Full"
+  , PM_GET_ALIAS('MRN', 0, per.PERSON_ID, 0, SYSDATE) as "Alias - Person MRN"
+  , v500.lab_fmt_accession(uces.accession_nbr) as "UCES - Acc Nbr"
+  , v500.omf_get_cv_display(uces.catalog_cd) as "UCES - Order Procedure"
+  , v500.omf_get_cv_description(uces.specimen_type_cd) as "UCES - Specimen Type Desc"
+  , cclsql_utc_cnvt(uces.in_lab_dt_tm , 1, 126) as "Date/Time - UCES In-Lab"
+  , v500.omf_get_cv_description(mtl_org.task_cd) as "Organism - Desc"
+  , v500.omf_get_cv_display(mtl_org.organism_cd) || ' #' || to_char(mtl_org.organism_qual) as "Organism Identifier"
+  , mtl_org.task_qual as "isolate"
+  , cclsql_utc_cnvt(mtl_anti.action_dt_tm , 1, 126) as "Date/Time - Susceptibility"
+  , v500.omf_get_cv_display(mtl_anti.task_cd) as "Sus Method - Disp"
+  , v500.omf_get_cv_display(msod.panel_cd) as "Sus Panel - Disp"
+  , v500.omf_get_cv_description(msmr.panel_medication_cd) as "Sus Antibiotic - Desc"
+  , omf_get_cv_description(msod.detail_sus_cd) as "Sus Detail - Desc"
+  , v500.omf_get_cv_display(msmr.result_cd) as "Sus Result Formatted - Disp"
+  , msmr.chartable_ind as "Sus Chartable"
+  , v500.omf_get_cv_display(enc.loc_nurse_unit_cd) as "Curr Person Loc - Nurse Unit"
+FROM PERSON PER
+  , UM_CHARGE_EVENT_ST UCES
+  , MIC_TASK_LOG MTL_ANTI
+  , MIC_TASK_LOG MTL_ORG
+  , MIC_SUS_ORDER_DETAIL MSOD
+  , MIC_DETAIL_TASK MDT
+  , MIC_SUS_MED_RESULT MSMR
+  , ENCOUNTER ENC
+WHERE (uces.patient_id = per.person_id)
+AND (uces.order_id = mtl_org.order_id (+)
+
+and mtl_org.task_class_flag (+) = 101)
+AND (uces.order_id = mtl_anti.order_id (+)
+
+and mtl_anti.task_class_flag (+) = 4)
+AND (mtl_anti.organism_cd = mtl_org.task_cd)
+AND (mtl_anti.task_log_id = msmr.task_log_id (+))
+AND (mtl_anti.task_log_id = msod.task_log_id(+))
+AND (msmr.task_log_id = msod.task_log_id
+
+
+AND (msod.panel_cd IN (2552842385 ,2555656023 ,2552842389 ,2552842387))
+and msmr.detail_sus_seq = msod.detail_sus_seq)
+AND (msod.detail_sus_cd = mdt.task_component_cd(+))
+AND (uces.encntr_id = enc.encntr_id)
+AND (uces.activity_type_cd = v500.omf_get_cvalue(106,'MICROBIOLOGY'))
+AND ((uces.catalog_cd IN (31713969.00,2552659503.00,2555442753.00,2555442745.00,2555442761.00,2555442769.00,2555442777.00,2555442785.00,2555442793.00,2555442801.00,2555442809.00,2555442817.00,2552839529.00,2552839537.00,2552839521.00,2552839393.00,2552839377.00,2552839409.00,2552839417.00,2552839401.00,2552839425.00))
+  AND (mtl_anti.action_dt_tm BETWEEN  cclsql_cnvtdatetimeutc(to_date('2023-12-12 00:00:00','YYYY-MM-DD HH24:MI:SS'), 1, 126,1) AND cclsql_cnvtdatetimeutc(to_date('2023-12-31 23:59:59','YYYY-MM-DD HH24:MI:SS'), 1, 126,1)))
+AND (per.name_first_key not in ('ADULTMALE', 'ADULTFEMALE','PEDMALE', 'PEDFEMALE', 'RMSADULTFEMALE') or per.name_last_key not in ('PROFICIENCY'))
+GROUP BY per.person_id, per.NAME_FULL_FORMATTED
+  , per.PERSON_ID
+  , v500.lab_fmt_accession(uces.accession_nbr)
+  , uces.catalog_cd
+  , v500.omf_get_cv_description(uces.specimen_type_cd)
+  , cclsql_utc_cnvt(uces.in_lab_dt_tm , 1, 126)
+  , v500.omf_get_cv_description(mtl_org.task_cd)
+  , v500.omf_get_cv_display(mtl_org.organism_cd) || ' #' || to_char(mtl_org.organism_qual)
+  , mtl_org.task_qual
+  , cclsql_utc_cnvt(mtl_anti.action_dt_tm , 1, 126) 
+  , v500.omf_get_cv_display(mtl_anti.task_cd)
+  , v500.omf_get_cv_display(msod.panel_cd)
+  , v500.omf_get_cv_description(msmr.panel_medication_cd)
+  , omf_get_cv_description(msod.detail_sus_cd)
+  , v500.omf_get_cv_display(msmr.result_cd)
+  , msmr.chartable_ind
+  , v500.omf_get_cv_display(enc.loc_nurse_unit_cd)
+ORDER BY per.NAME_FULL_FORMATTED nulls first
+  , PM_GET_ALIAS('MRN', 0, per.PERSON_ID, 0, SYSDATE) nulls first
+  , v500.lab_fmt_accession(uces.accession_nbr) nulls first
+  , v500.omf_get_cv_display(uces.catalog_cd) nulls first
+  , v500.omf_get_cv_description(uces.specimen_type_cd) nulls first
+  , cclsql_utc_cnvt(uces.in_lab_dt_tm , 1, 126) nulls first
+  , v500.omf_get_cv_description(mtl_org.task_cd) nulls first
+  , v500.omf_get_cv_display(mtl_org.organism_cd) || ' #' || to_char(mtl_org.organism_qual) nulls first
+  , mtl_org.task_qual nulls first
+  , cclsql_utc_cnvt(mtl_anti.action_dt_tm , 1, 126) nulls first
+  , v500.omf_get_cv_display(mtl_anti.task_cd) nulls first
+  , v500.omf_get_cv_display(msod.panel_cd) nulls first
+  , v500.omf_get_cv_description(msmr.panel_medication_cd) nulls first
+  , omf_get_cv_description(msod.detail_sus_cd) nulls first
+  , v500.omf_get_cv_display(msmr.result_cd) nulls first
+  , msmr.chartable_ind nulls first
+  , v500.omf_get_cv_display(enc.loc_nurse_unit_cd) nulls first
+"""
+```
+
+```{python}
+clear_back_up_folder()
+
+copy_current_files_to_back_up()
+
+cur = connection.cursor()
+result = cur.execute(query).fetchall()
+columns = [desc[0] for desc in cur.description]
+new_data = pd.DataFrame(result, columns=columns)
+cur.close()
+connection.close()
+
+current_data = pd.read_csv(data_location + "/antibiogram_2023.csv")
+concat_df = pd.concat([current_data, new_data]).drop_duplicates()
+
+concat_df.to_csv(data_location + "/antibiogram_2023.csv", index=False)
+
+```
+```{python}
+
+connection = oracledb.connect(
+    user=config["DB_USER"], password=config["DB_PASS"], dsn=config["DB_NAME"]
+)
+        
+mdr_query = """
+SELECT
+  per.NAME_FULL_FORMATTED as "Person Name - Full"
+  , PM_GET_ALIAS('MRN', 0, per.PERSON_ID, 0, SYSDATE) as "Alias - Person MRN"
+  , v500.lab_fmt_accession(uces.accession_nbr) as "UCES - Acc Nbr"
+  , v500.omf_get_cv_display(uces.catalog_cd) as "UCES - Order Procedure"
+  , cclsql_utc_cnvt(uces.in_lab_dt_tm , 1, 126) as "Date/Time - UCES In-Lab"
+  , v500.lab_get_long_text_nortf(mtl_rpt.long_text_id) as "Report Text"
+  , v500.omf_get_cv_display(mrr.response_cd) as "Report Resp - Disp"
+FROM PERSON PER
+  , UM_CHARGE_EVENT_ST UCES
+  , MIC_REPORT_RESPONSE MRR
+  , MIC_TASK_LOG MTL_RPT
+  , MIC_ORDER_LAB MOL
+WHERE (uces.patient_id = per.person_id)
+AND (uces.order_id = mol.order_id)
+AND (mol.order_id = mtl_rpt.order_id (+)
+
+and mtl_rpt.task_class_flag (+) = 5)
+AND (mol.order_id = uces.order_id(+))
+AND (mtl_rpt.task_log_id = mrr.task_log_id (+))
+AND (uces.activity_type_cd = v500.omf_get_cvalue(106,'MICROBIOLOGY'))
+AND ((uces.in_lab_dt_tm BETWEEN cclsql_cnvtdatetimeutc(to_date('2023-01-01 00:00:00','YYYY-MM-DD HH24:MI:SS'), 1, 126,1) AND cclsql_cnvtdatetimeutc(to_date('2023-12-31 23:59:59','YYYY-MM-DD HH24:MI:SS'), 1, 126,1))
+  AND (uces.catalog_cd IN (2552839377.00,2552659503.00,2555442753.00,2555442745.00,2555442761.00,2555442769.00,2555442777.00,2555442785.00,2555442793.00,2555442801.00,2555442809.00,2555442817.00,2552839401.00,31713969.00,2552839529.00,2552839521.00,2552839537.00,2552839561.00,2552839673.00,2552839409.00,2552839417.00,2552839393.00,2552839425.00))
+  AND (mrr.positive_ind IN (1))
+  AND (mrr.response_cd IN (2552914663.00,2554954053.00)))
+  AND (per.name_first_key not in ('ADULTMALE', 'ADULTFEMALE','PEDMALE', 'PEDFEMALE', 'RMSADULTFEMALE') or per.name_last_key not in ('PROFICIENCY'))
+GROUP BY per.person_id, per.NAME_FULL_FORMATTED
+  , per.PERSON_ID
+  , v500.lab_fmt_accession(uces.accession_nbr)
+  , uces.catalog_cd
+  , cclsql_utc_cnvt(uces.in_lab_dt_tm , 1, 126)
+  , v500.lab_get_long_text_nortf(mtl_rpt.long_text_id)
+  , v500.omf_get_cv_display(mrr.response_cd)
+ORDER BY per.NAME_FULL_FORMATTED nulls first
+  , PM_GET_ALIAS('MRN', 0, per.PERSON_ID, 0, SYSDATE) nulls first
+  , v500.lab_fmt_accession(uces.accession_nbr) nulls first
+  , v500.omf_get_cv_display(uces.catalog_cd) nulls first
+  , cclsql_utc_cnvt(uces.in_lab_dt_tm , 1, 126) nulls first
+  , v500.lab_get_long_text_nortf(mtl_rpt.long_text_id) nulls first
+  , v500.omf_get_cv_display(mrr.response_cd) nulls first
+"""
+```
+
+```{python}
+cur = connection.cursor()
+result = cur.execute(mdr_query).fetchall()
+columns = [desc[0] for desc in cur.description]
+df = pd.DataFrame(result, columns=columns)
+cur.close()
+connection.close()
+
+df.to_csv(data_location + "/mdr_2023.csv", index=False)
+
+```
+
+
+
+```{r}
+library(tidyverse)
+raw_cerner_antibiogram_2023 = 
+  read_csv(
+  "data/antibiogram_2023.csv"
+  ) %>%
+  janitor::clean_names(
+  ) %>% 
+  filter(
+    sus_result_formatted_disp != "-"
+    ) %>% 
+  select(-organism_identifier)
+
+mdr = 
+  read_csv(
+    "./data/mdr_2023.csv"
+    ) %>% 
+  janitor::clean_names()
+
+
+enterobacters = 
+  list(
+  "Klebsiella pneumoniae",
+  "Klebsiella pneumoniae ESBL",
+  "Escherichia coli",
+  "Escherichia coli ESBL",
+  "Enterobacter cloacae/asburiae",
+  "Enterobacter cloacae complex",
+  "Klebsiella oxytoca",
+  "Klebsiella (formerly Enterobacter) aerogenes"
+  )
+
+carbapenams = 
+  list(
+  "Ertapenem",
+  "Meropenem",
+  "Imipenem")
+
+cre = read_csv(
+  "H:/MicroBiology/QMS Data/Tableau QMS Monitors/data/CREPCR.csv"
+  ) %>%
+  janitor::clean_names() %>%
+  select(
+    accession_nbr_formatted,
+    orderable,
+    discrete_assay,
+    result_formatted
+  ) %>% 
+  pivot_wider(
+    names_from = discrete_assay,
+    values_from = result_formatted
+  ) %>% 
+  select(
+    -`CRE Spec Source`
+    ) %>% 
+  rename(
+    cre_organism = `CRE Organism`,
+    OXA = OXA48
+  )
+  
+
+eplex = read_csv("H:/MicroBiology/QMS Data/Tableau QMS Monitors/projects/BCID/data/bcid.csv") %>% 
+  janitor::clean_names() %>% 
+  filter(
+    discrete_assay %in% list(
+      "CTXM Resistance",
+      "IMP Resistance",
+      "KPC Resistance",
+      "NDM Resistance",
+      "OXA Resistance",
+      "VIM Resistance")
+    ) %>%
+  select(
+    accession_nbr_formatted,
+    orderable,
+    discrete_assay,
+    result_formatted
+  ) %>% 
+  filter(
+    orderable == "Gram Negative Qual Blood Cult NAT Panel"
+  ) %>% 
+ mutate(
+   result_formatted = 
+     case_when(
+       result_formatted == "N/A" ~ NA,
+       TRUE ~ result_formatted
+     )
+ ) %>% 
+  filter(
+    !is.na(
+      result_formatted
+      )
+    ) %>% 
+  pivot_wider(
+    names_from = discrete_assay,
+    values_from = result_formatted
+  ) %>% 
+  rename(
+    IMP = `IMP Resistance`,
+    KPC = `KPC Resistance`,
+    NDM = `NDM Resistance`,
+    OXA = `OXA Resistance`,
+    VIM = `VIM Resistance`,
+    CTXM = `CTXM Resistance`
+    )
+
+
+cre_genes = cre %>% 
+  bind_rows(
+    eplex
+    ) %>% 
+  rename(
+    uces_acc_nbr = accession_nbr_formatted,
+    cre_method = orderable
+    ) %>% select(uces_acc_nbr, IMP, KPC, NDM, OXA, VIM) %>% 
+  pivot_longer(cols = c(IMP, KPC, NDM, OXA, VIM), names_to = "cre_gene", values_to = "result") %>% filter(result == "Detected")
+
+
+org_names = read_csv("./org_names.csv")
+
+
+piptaz = read_csv("./piptaz.csv")
+
+```
+```{r}
+one_org_per_pt = function(df) {
+
+arranged = 
+  df %>%
+  select(
+    alias_person_mrn,
+    uces_acc_nbr,
+    organism_desc,
+    isolate,
+    uces_order_procedure
+    ) %>%
+  distinct() %>% 
+  arrange(
+    alias_person_mrn,
+    uces_order_procedure,
+    organism_desc,
+    uces_acc_nbr,
+    isolate
+    ) %>% 
+  group_by(
+    alias_person_mrn,
+    uces_order_procedure,
+    organism_desc
+    ) %>% 
+  mutate(
+    occurence = 1:n()) %>% 
+  filter(
+    occurence == 1)
+
+
+filtered = 
+  df %>%
+  left_join(
+    arranged
+    ) %>% 
+  filter(
+    occurence == 1
+    ) %>% 
+  select(
+    -occurence
+    ) %>% 
+  ungroup()
+
+return(filtered)
+}
+
+str_detect_mult =
+  function(subject, query ) {
+    sapply(
+      query,
+      str_detect,
+      string = subject ) %>%
+    rowSums( na.rm = TRUE ) != 0
+}
+
+```
+
+
+
+```{r}
+fos = raw_cerner_antibiogram_2023 %>% 
+  filter(sus_detail_desc == "Kirby-Bauer Interpretation") %>% 
+  rename(Fosfomycin = sus_result_formatted_disp) %>% 
+  select(uces_acc_nbr,isolate, Fosfomycin) %>% 
+  mutate_all(as.character)
+
+errors = c("23-047-05651",
+           "23-072-06313",
+           "23-063-00786",
+           "23-064-00082",
+           "23-074-03101",
+           "23-053-00464")
+
+anti_errors = 
+  raw_cerner_antibiogram_2023 %>%
+  select(
+    -c(
+      sus_chartable)
+    ) %>% 
+  left_join(
+    org_names
+    ) %>%
+  filter(uces_acc_nbr %in% errors) %>% 
+  filter(
+    uces_acc_nbr != "23-047-05651",
+    uces_acc_nbr != "23-053-00464",
+  !(uces_acc_nbr == "23-072-06313" & (sus_result_formatted_disp == "Na" | sus_result_formatted_disp == "NIA")),
+  !(uces_acc_nbr == "23-063-00786" & isolate == 2),
+  !(uces_acc_nbr == "23-064-00082" & isolate == 2),
+  !(uces_acc_nbr == "23-074-03101" & isolate == 4)
+  ) 
+
+
+antibiogram = 
+  raw_cerner_antibiogram_2023 %>%
+  select(
+    -c(
+      sus_chartable)
+    ) %>%
+  filter(
+    !str_detect_mult(
+      person_name_full, c("ADULT",
+                          "PEDMALE",
+                          "PEDFEMALE",
+                          "PROFICIENCY"
+                          )
+                    )
+        ) %>% 
+  left_join(
+    org_names
+    ) %>%
+  filter(!(uces_acc_nbr %in% errors),
+         sus_detail_desc != "Kirby-Bauer Interpretation") %>% 
+  bind_rows(anti_errors) %>% 
+  mutate(
+    organism_desc = case_when(
+      is.na(organism) ~ organism_desc,
+      !is.na(organism) ~ organism
+      ),
+    sus_result_formatted_disp = case_when(
+      sus_result_formatted_disp == "BLAC" ~ "R",
+      TRUE ~ sus_result_formatted_disp
+      ),
+    uces_order_procedure = case_when(
+      str_detect(uces_order_procedure, "Blood") ~ "Bacterial Blood Culture",
+      TRUE ~ uces_order_procedure
+      )
+    ) %>% 
+  select(
+    -organism
+    ) %>% 
+  distinct() %>% 
+  pivot_wider(names_from = sus_detail_desc, values_from = sus_result_formatted_disp) %>% 
+  left_join(piptaz) %>%   
+  mutate(
+    `MIC Interpretation` = case_when(
+    `MIC Interpretation` == "N/R" ~ Interp,
+    TRUE ~ `MIC Interpretation`
+    ),
+    gram = case_when(
+      sus_panel_disp %in% c("NM53", "Fosfo KB") ~ "Gram Negative",
+      sus_panel_disp %in% c("PM34", "MSTRP+1") ~ "Gram Positive",
+      TRUE ~ NA
+    )
+  ) %>% 
+  relocate(
+    gram,
+    .after = organism_desc
+  ) %>% 
+  select(-c(Interp, `MIC Dilution`, sus_panel_disp, sus_method_disp)) %>% 
+  mutate_all(as.character) %>%   
+  distinct() %>% 
+  pivot_wider(
+    names_from = sus_antibiotic_desc,
+    values_from = `MIC Interpretation`
+    ) %>% 
+  arrange(
+    alias_person_mrn,
+    uces_order_procedure,
+    organism_desc,
+    uces_acc_nbr,
+    isolate,
+    desc(date_time_susceptibility)
+    ) %>% 
+  group_by(
+    alias_person_mrn,
+    uces_order_procedure,
+    organism_desc,
+    uces_acc_nbr,
+    isolate
+    ) %>% 
+  mutate(
+    occurence = 1:n()) %>% 
+  ungroup() %>% 
+  filter(
+    occurence == 1
+    ) %>% 
+  select(-occurence) %>% 
+  mutate(
+    cre = case_when(
+    organism_desc 
+    %in% enterobacters 
+    & (Imipenem == "R" | Ertapenem == "R" | Meropenem == "R")
+    ~ "CRE",
+    TRUE ~ NA
+    )
+    ) %>%
+  mutate(
+    mdr = 
+      ifelse(
+        organism_desc %in% c("Pseudomonas aeruginosa", "Acinetobacter", "Acinetobacter baumannii complex") &
+          uces_acc_nbr %in% mdr$uces_acc_nbr,
+        "MDR",
+        NA)
+    ) %>%
+  relocate(
+    cre,
+    mdr,
+    .after = organism_desc
+  ) %>% 
+  left_join(fos) %>% 
+  pivot_longer(
+    cols =
+      c(14:65),
+    names_to =
+      "antibiotic",
+    values_to =
+      "interp_result"
+  ) %>%  
+  mutate(
+    organism_desc = 
+      case_when(
+        cre == "CRE" ~ str_c(organism_desc, " CRE"),
+        mdr == "MDR" ~ str_c(organism_desc, " MDR"),
+        TRUE ~ organism_desc
+        )
+    ) %>% 
+  mutate(
+    organism_desc = 
+      case_when(
+        str_detect(organism_desc, "ESBL CRE") ~ str_remove(organism_desc, "ESBL "),
+        TRUE ~ organism_desc)
+    ) %>% 
+  distinct() %>% 
+  pivot_wider(
+    names_from = antibiotic,
+    values_from = interp_result
+  ) %>%  
+  one_org_per_pt() %>%  
+  pivot_longer(
+    cols =
+      c(14:65),
+    names_to =
+      "antibiotic",
+    values_to =
+      "interp_result"
+    ) %>% 
+  filter(
+    !is.na(interp_result)
+  ) %>% 
+  distinct() %>% 
+  mutate(
+    organism_desc = case_when(
+      uces_order_procedure == "Bacterial Blood Culture" &
+        (organism_desc == "Escherichia coli ESBL" |  organism_desc == "Klebsiella pneumoniae ESBL") ~ "Escherichia coli ESBL / Klebsiella pneumoniae ESBL",
+      TRUE ~ organism_desc
+    )
+  ) 
+
+write_csv(antibiogram, "./output/antibiogram.csv", na = "")
+
+organism_count = antibiogram %>%
+  select(uces_order_procedure,
+        uces_acc_nbr,
+        organism_desc
+        ) %>% 
+  distinct() %>% 
+  count(uces_order_procedure,
+        organism_desc) %>% 
+  rename(
+    organism_total = n
+  ) 
+
+
+result = antibiogram %>%
+  filter(
+    uces_order_procedure %in% 
+      c("Bacterial Blood Culture",
+        "Bacterial Culture Urine"
+        )
+    ) %>% 
+  count(
+    uces_order_procedure,
+    organism_desc,
+    gram,
+    antibiotic,
+    interp_result
+    ) %>%
+  pivot_wider(
+    names_from = 
+      interp_result,
+    values_from =
+      n
+    ) %>% 
+  left_join(
+    organism_count
+  ) %>%
+  filter(
+    organism_total > 15
+  ) %>% 
+  rename(
+    organism = organism_desc,
+    order_procedure = uces_order_procedure
+         ) %>% 
+  rowwise() %>% 
+  mutate(
+    antibiotic_total = sum(
+      c_across(5:7), na.rm = TRUE
+      )
+    ) %>%   
+  mutate(
+    frac =  str_c(S, organism_total , sep = "/")) %>% 
+  mutate(
+    susceptible_pct = paste(
+    as.character(
+    numform::round2(
+    (S/organism_total)*100,
+    digits = 0)
+    )
+    , "%", sep = '')
+    ) %>% 
+  mutate(
+    sus =  paste0(susceptible_pct, "\n", frac)
+    ) %>%
+  mutate(
+    sus = ifelse(
+      sus == "NA%\nNA", NA, sus
+    ),
+    susceptible_pct = ifelse(
+      susceptible_pct == "NA%", NA, susceptible_pct
+      ) 
+    )
+
+
+write_csv(result, "./output/result.csv", na = "")
+
+```
+
+```{r}
+cnst = antibiogram %>% filter(organism_desc == "Enterococcus faecium", uces_order_procedure == "Bacterial Blood Culture", antibiotic == "Vancomycin") %>% filter(duplicated(person_name_full))
+
+cn = antibiogram %>% filter(organism_desc == "Escherichia coli", uces_order_procedure == "Bacterial Culture Urine") %>% select(1:13) %>% distinct() %>% filter(duplicated(person_name_full))
+dup = cn %>% filter(is.na(Amikacin))
+unique(cn$Amikacin)
+
+ecla = antibiogram %>% filter(organism_desc == "Enterobacter cloacae complex", uces_order_procedure == "Bacterial Culture Urine") %>% select(1:7) %>% distinct() %>% filter(duplicated(person_name_full))	
+st = raw_cerner_antibiogram_2023 %>% filter(uces_acc_nbr == "23-063-00786")
+no_fos = antibiogram %>% filter(organism_desc == "Escherichia coli ESBL", uces_order_procedure == "Bacterial Culture Urine", is.na(Fosfomycin))
+
+cip = antibiogram %>% filter(uces_order_procedure == "Bacterial Blood Culture" & organism_desc == "Escherichia coli" & antibiotic == "Levofloxacin" & interp_result == "S") 
+
+lev = antibiogram %>% filter(uces_order_procedure == "Bacterial Blood Culture" & organism_desc == "Escherichia coli" & antibiotic == "Ciprofloxacin" & interp_result == "S")
+`%!in%` = Negate(`%in%`)
+not_cip = setdiff(lev$uces_acc_nbr, cip$uces_acc_nbr)
+not_lev = setdiff(cip$uces_acc_nbr, lev$uces_acc_nbr)
+```
+
+
+```{r}
+cre_antibio = antibiogram  %>% 
+  distinct() %>%
+  filter(
+    organism_desc %in% c(
+      enterobacters,
+      "Pseudomonas aeruginosa",
+      "Pseudomonas aeruginosa MDR",
+      "Acinetobacter",
+      "Acinetobacter baumannii complex",
+      "Acinetobacter MDR",
+      "Acinetobacter baumannii complex MDR",
+      "Klebsiella pneumoniae CRE",
+      "Escherichia coli CRE",
+      "Enterobacter cloacae/asburiae CRE ",
+      "Enterobacter cloacae complex CRE",
+      "Klebsiella oxytoca CRE",
+      "Klebsiella (formerly Enterobacter) aerogenes CRE"
+      ),
+    uces_order_procedure %in% 
+      c("Bacterial Blood Culture",
+        "Bacterial Culture Urine"
+        )
+    ) %>% 
+  left_join(cre_genes)
+
+
+gene_count = cre_antibio %>%
+  select(uces_order_procedure,
+         uces_acc_nbr,
+         organism_desc,
+        cre_gene
+        ) %>%
+  mutate(organism_desc = str_trim(str_replace_all(organism_desc, paste0(rep, collapse = "|"), ""))) %>% 
+  distinct() %>% 
+  count(uces_order_procedure,
+        organism_desc, cre_gene) %>% 
+  rename(
+    gene_total = n
+  ) %>% 
+  pivot_wider(names_from =  cre_gene, values_from = gene_total) %>% 
+  select(-`NA`)
+
+
+rep = c("ESBL", "CRE", "MDR")
+
+cre_count = cre_antibio %>%
+  select(uces_order_procedure,
+         uces_acc_nbr,
+        organism_desc, cre, mdr,
+        cre_gene
+        ) %>%
+  mutate(organism_desc = str_trim(str_replace_all(organism_desc, paste0(rep, collapse = "|"), ""))) %>% 
+  distinct() %>% 
+  count(uces_order_procedure,
+        organism_desc, cre, mdr) %>% 
+  rename(
+    organism_total = n
+  ) %>% 
+  pivot_wider(names_from =  c(cre,mdr), values_from = organism_total) %>% 
+  mutate(mdro = case_when(
+    organism_desc %in% c("Acinetobacter baumannii complex", "Pseudomonas aeruginosa") ~ "Multi Drug Resistant",
+    TRUE ~ "Carbapenam Resistant"
+  )) %>% 
+  mutate(across(everything(), ~ifelse(is.na(.), 0, .))) %>% 
+  rename("sus" = NA_NA) %>%
+  rowwise() %>% 
+  mutate(res = sum(NA_MDR, CRE_NA)) %>%
+  mutate(total = sum(res, sus)) %>% 
+  mutate(
+    frac =  str_c(res, total , sep = "/")) %>% 
+  mutate(
+    pct = paste(
+    as.character(
+    numform::round2(
+    (res/total)*100,
+    digits = 1)
+    )
+    , "%", sep = '')
+    ) %>% 
+  mutate(
+    pheno =  paste0(pct, "\n", frac)
+    ) %>%
+  mutate(
+    sus = ifelse(
+      sus == "NA%\nNA", NA, sus
+    ),
+    pct = ifelse(
+      pct == "NA%", NA, pct
+      ) 
+    ) %>% 
+  select(mdro, uces_order_procedure, organism_desc, res, sus, total, frac, pct, pheno) %>% 
+  left_join(gene_count)
+  
+
+write_csv(cre_count, "./output/cre_count.csv", na="")
+
+```
