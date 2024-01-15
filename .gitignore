@@ -2,7 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
-.git
 !org_names.csv
 !piptaz.csv
 *.env
